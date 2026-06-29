@@ -1,17 +1,11 @@
 import { useState, useRef, useEffect } from 'react';
 import { Upload, Send, FileText, Trash2, Loader2 } from 'lucide-react';
-import { documentApi, chatApi } from '../../services/api';
+import { documentApi, chatApi, getApiErrorMessage, type DocumentInfo } from '../../services/api';
 
 interface Message {
   role: 'user' | 'assistant';
   content: string;
-  sources?: Array<{ content: string; metadata: any }>;
-}
-
-interface DocumentInfo {
-  filename: string;
-  size: number;
-  modified: string;
+  sources?: Array<{ content: string; metadata: Record<string, unknown> }>;
 }
 
 export default function RAGPanel() {
@@ -54,10 +48,11 @@ export default function RAGPanel() {
     } catch (error) {
       setMessages(prev => [...prev, {
         role: 'assistant',
-        content: `上传失败: ${error}`
+        content: `上传失败: ${getApiErrorMessage(error)}`
       }]);
     } finally {
       setUploading(false);
+      e.target.value = '';
     }
   };
 
@@ -66,7 +61,10 @@ export default function RAGPanel() {
       await documentApi.delete(filename);
       await loadDocuments();
     } catch (error) {
-      console.error('Delete failed:', error);
+      setMessages(prev => [...prev, {
+        role: 'assistant',
+        content: `删除失败: ${getApiErrorMessage(error)}`
+      }]);
     }
   };
 
@@ -88,7 +86,7 @@ export default function RAGPanel() {
     } catch (error) {
       setMessages(prev => [...prev, {
         role: 'assistant',
-        content: `查询失败: ${error}`
+        content: `查询失败: ${getApiErrorMessage(error)}`
       }]);
     } finally {
       setLoading(false);
@@ -132,7 +130,7 @@ export default function RAGPanel() {
                   <FileText className="h-5 w-5 text-gray-400" />
                   <div>
                     <p className="text-sm font-medium text-gray-900 truncate max-w-[150px]">
-                      {doc.filename}
+                      {doc.original_filename}
                     </p>
                     <p className="text-xs text-gray-500">
                       {(doc.size / 1024).toFixed(1)} KB
@@ -140,7 +138,7 @@ export default function RAGPanel() {
                   </div>
                 </div>
                 <button
-                  onClick={() => handleDelete(doc.filename)}
+                  onClick={() => handleDelete(doc.safe_filename || doc.filename)}
                   className="text-red-600 hover:text-red-800"
                 >
                   <Trash2 className="h-4 w-4" />

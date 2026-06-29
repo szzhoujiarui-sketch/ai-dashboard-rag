@@ -7,6 +7,7 @@ from dotenv import load_dotenv
 from app.modules.api import documents, chat, stats
 from app.modules.rag.engine import RAGEngine
 from app.modules.dashboard.metrics import MetricsCollector
+from app.config import settings
 
 load_dotenv()
 
@@ -30,7 +31,7 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=settings.cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

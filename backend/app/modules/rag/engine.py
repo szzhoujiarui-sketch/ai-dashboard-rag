@@ -6,7 +6,8 @@ from langchain.chains import RetrievalQA
 from langchain.prompts import PromptTemplate
 import os
 import uuid
-from typing import List, Optional
+from time import perf_counter
+from typing import Optional
 from ...config import settings
 
 class RAGEngine:
@@ -59,8 +60,8 @@ class RAGEngine:
             chunk.metadata['document_id'] = document_id
         
         ids = [f"{document_id}_{i}" for i in range(len(chunks))]
-        self.vectorstore._collection.add(
-            documents=[chunk.page_content for chunk in chunks],
+        self.vectorstore.add_texts(
+            texts=[chunk.page_content for chunk in chunks],
             metadatas=[chunk.metadata for chunk in chunks],
             ids=ids
         )
@@ -80,10 +81,12 @@ class RAGEngine:
         if not self.qa_chain:
             raise RuntimeError("RAG engine not initialized")
         
+        started_at = perf_counter()
         result = self.qa_chain.invoke({"query": question})
+        response_time = perf_counter() - started_at
         
         from app.modules.dashboard.metrics import metrics_collector
-        metrics_collector.increment_queries()
+        metrics_collector.increment_queries(response_time)
         
         return {
             "answer": result['result'],
@@ -99,7 +102,7 @@ class RAGEngine:
     async def delete_document(self, document_id: str) -> bool:
         if not self.vectorstore:
             return False
-        self.vectorstore._collection.delete(where={"document_id": document_id})
+        self.vectorstore.delete(where={"document_id": document_id})
         return True
 
     async def cleanup(self):
