@@ -50,6 +50,7 @@ python -m venv venv
 source venv/bin/activate  # Windows: venv\Scripts\activate
 pip install -r requirements.txt
 cp .env.example .env
+
 # Edit .env and fill in OPENAI_API_KEY
 uvicorn app.main:app --reload
 ```
@@ -75,8 +76,32 @@ docker-compose up --build
 - **Document upload & parsing**: PDF, TXT, Markdown
 - **Vector search**: ChromaDB-based semantic search
 - **RAG-based Q&A**: Ask questions about uploaded documents
-- **Dashboard**: Query trends, accuracy, system metrics
+- **Dashboard**: Query trends, response time, system runtime metrics
 - **Modular design**: RAG engine, vector store, and frontend components are independently replaceable
+
+## Configuration
+
+Backend environment variables are defined in `backend/.env.example`:
+
+- `OPENAI_API_KEY`: required for LLM and embedding calls.
+- `OPENAI_BASE_URL`: OpenAI-compatible API endpoint.
+- `MODEL_NAME`: chat model used by LangChain.
+- `CHROMA_PERSIST_DIR`: local ChromaDB persistence directory.
+- `UPLOAD_DIR`: local uploaded-document directory.
+- `ALLOWED_ORIGINS`: comma-separated CORS allowlist for the frontend.
+
+## Testing
+
+```bash
+cd backend
+pytest
+```
+
+The backend tests cover API health, request validation, document registry metadata, upload path boundaries, and dashboard metrics without calling external LLM services.
+
+## Demo Caveats
+
+This repository is an MVP/demo baseline. Production deployments should add authentication, tenant isolation, file scanning, access control, rate limiting, and managed secret storage.
 
 ## Module Replacement Guide
 
@@ -98,11 +123,9 @@ Frontend is pure React + Vite, can be migrated to:
 
 ### Production
 ```bash
-# Backend
 cd backend
 uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 4
 
-# Frontend
 cd frontend
 npm run build
 npm run preview

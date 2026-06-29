@@ -7,6 +7,7 @@ from ...config import settings
 class MetricsCollector:
     def __init__(self):
         self.metrics_file = os.path.join(settings.chroma_persist_dir, "metrics.json")
+        self.started_at = datetime.now()
         self._load()
 
     def _load(self):
@@ -30,17 +31,27 @@ class MetricsCollector:
                 "query_history": self.query_history
             }, f, indent=2)
 
-    def increment_queries(self):
+    def increment_queries(self, response_time: float):
         self.total_queries += 1
         self.query_history.append({
             "timestamp": datetime.now().isoformat(),
-            "response_time": 0.0
+            "response_time": response_time
         })
         self._save()
 
     def increment_documents(self):
         self.total_documents += 1
         self._save()
+
+    def _format_uptime(self) -> str:
+        total_seconds = int((datetime.now() - self.started_at).total_seconds())
+        hours, remainder = divmod(total_seconds, 3600)
+        minutes, seconds = divmod(remainder, 60)
+        if hours:
+            return f"{hours}h {minutes}m"
+        if minutes:
+            return f"{minutes}m {seconds}s"
+        return f"{seconds}s"
 
     def get_dashboard_stats(self) -> Dict[str, Any]:
         avg_response_time = 0.0
@@ -50,8 +61,7 @@ class MetricsCollector:
         return {
             "total_queries": self.total_queries,
             "total_documents": self.total_documents,
-            "avg_accuracy": 0.85,
-            "uptime": "99.5%",
+            "uptime": self._format_uptime(),
             "avg_response_time": round(avg_response_time, 2),
             "last_updated": datetime.now().isoformat()
         }
@@ -59,7 +69,7 @@ class MetricsCollector:
     def get_query_trends(self) -> Dict[str, List]:
         days = 7
         data = []
-        base_date = datetime.now() - timedelta(days=days)
+        base_date = datetime.now() - timedelta(days=days - 1)
         
         for i in range(days):
             date = base_date + timedelta(days=i)
@@ -68,11 +78,14 @@ class MetricsCollector:
             data.append({
                 "date": date_str,
                 "queries": len(day_queries),
-                "accuracy": 0.85
+                "avg_response_time": round(
+                    sum(q.get("response_time", 0.0) for q in day_queries) / len(day_queries),
+                    2
+                ) if day_queries else 0.0
             })
         
         return {
             "dates": [d["date"] for d in data],
             "queries": [d["queries"] for d in data],
-            "accuracy": [d["accuracy"] for d in data]
+            "avg_response_time": [d["avg_response_time"] for d in data]
         }

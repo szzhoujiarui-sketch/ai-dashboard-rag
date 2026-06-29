@@ -11,21 +11,7 @@ import {
   BarChart,
   Bar,
 } from 'recharts';
-import { statsApi } from '../../services/api';
-
-interface DashboardStats {
-  total_queries: number;
-  total_documents: number;
-  avg_accuracy: number;
-  uptime: string;
-  last_updated: string;
-}
-
-interface TrendData {
-  dates: string[];
-  queries: number[];
-  accuracy: number[];
-}
+import { statsApi, type DashboardStats, type TrendData } from '../../services/api';
 
 export default function Dashboard() {
   const [stats, setStats] = useState<DashboardStats | null>(null);
@@ -62,7 +48,7 @@ export default function Dashboard() {
     ? trends.dates.map((date, i) => ({
         date,
         queries: trends.queries[i],
-        accuracy: trends.accuracy[i],
+        avg_response_time: trends.avg_response_time[i],
       }))
     : [];
 
@@ -74,7 +60,7 @@ export default function Dashboard() {
       <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-4">
         <StatCard title="总查询数" value={stats?.total_queries} />
         <StatCard title="文档数量" value={stats?.total_documents} />
-        <StatCard title="平均准确率" value={stats?.avg_accuracy} suffix="%" />
+        <StatCard title="平均响应时间" value={stats?.avg_response_time} suffix="s" />
         <StatCard title="系统运行时间" value={stats?.uptime} />
       </div>
 
@@ -86,7 +72,7 @@ export default function Dashboard() {
             <CartesianGrid strokeDasharray="3 3" />
             <XAxis dataKey="date" />
             <YAxis yAxisId="left" />
-            <YAxis yAxisId="right" orientation="right" domain={[0, 1]} />
+            <YAxis yAxisId="right" orientation="right" />
             <Tooltip />
             <Legend />
             <Line
@@ -99,9 +85,9 @@ export default function Dashboard() {
             <Line
               yAxisId="right"
               type="monotone"
-              dataKey="accuracy"
+              dataKey="avg_response_time"
               stroke="#10b981"
-              name="准确率"
+              name="平均响应时间（秒）"
             />
           </LineChart>
         </ResponsiveContainer>

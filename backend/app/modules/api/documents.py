@@ -1,6 +1,5 @@
 from fastapi import APIRouter, UploadFile, File, HTTPException, Request
 from fastapi.responses import JSONResponse
-from typing import List
 import os
 import uuid
 import aiofiles
@@ -11,6 +10,13 @@ from app.config import settings
 
 ALLOWED_EXTENSIONS = {'.pdf', '.txt', '.md', '.csv', '.json'}
 router = APIRouter()
+
+def get_upload_path(filename: str) -> str:
+    upload_dir = os.path.abspath(settings.upload_dir)
+    file_path = os.path.abspath(os.path.join(upload_dir, filename))
+    if os.path.commonpath([upload_dir, file_path]) != upload_dir:
+        raise HTTPException(status_code=400, detail="文件路径无效")
+    return file_path
 
 @router.post("/upload")
 async def upload_document(request: Request, file: UploadFile = File(...)):
@@ -23,7 +29,7 @@ async def upload_document(request: Request, file: UploadFile = File(...)):
         raise HTTPException(status_code=400, detail=f"不支持的文件类型: {ext}")
     
     safe_filename = f"{uuid.uuid4().hex}{ext}"
-    file_path = os.path.join(settings.upload_dir, safe_filename)
+    file_path = get_upload_path(safe_filename)
     
     try:
         async with aiofiles.open(file_path, 'wb') as f:
@@ -36,9 +42,10 @@ async def upload_document(request: Request, file: UploadFile = File(...)):
         result = await rag_engine.ingest_document(file_path)
         document_id = result.get("document_id")
         if document_id:
-            document_registry.register(safe_filename, document_id)
+            document_registry.register(safe_filename, document_id, original_filename, file_size)
         
-        result["filename"] = original_filename
+        result["filename"] = safe_filename
+        result["original_filename"] = original_filename
         return JSONResponse(content=result)
     except Exception as e:
         if os.path.exists(file_path):
@@ -52,10 +59,15 @@ async def list_documents():
     files = []
     if os.path.exists(settings.upload_dir):
         for f in os.listdir(settings.upload_dir):
-            file_path = os.path.join(settings.upload_dir, f)
+            file_path = get_upload_path(f)
+            if not os.path.isfile(file_path):
+                continue
+            document = document_registry.get_document(f) or {}
             files.append({
                 "filename": f,
-                "original_filename": document_registry.get_document_id(f) or f,
+                "safe_filename": f,
+                "original_filename": document.get("original_filename") or f,
+                "document_id": document.get("document_id"),
                 "size": os.path.getsize(file_path),
                 "modified": datetime.fromtimestamp(
                     os.path.getmtime(file_path)
@@ -66,7 +78,7 @@ async def list_documents():
 @router.delete("/{filename}")
 async def delete_document(request: Request, filename: str):
     rag_engine: RAGEngine = request.app.state.rag_engine
-    file_path = os.path.join(settings.upload_dir, filename)
+    file_path = get_upload_path(filename)
     
     if os.path.exists(file_path):
         document_id = document_registry.get_document_id(filename)
