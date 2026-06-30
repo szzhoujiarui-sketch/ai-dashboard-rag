@@ -29,12 +29,13 @@ class DocumentRegistry:
         with open(REGISTRY_PATH, 'w') as f:
             json.dump(self._mapping, f, indent=2)
 
-    def register(self, filename: str, document_id: str, original_filename: str, size: int):
+    def register(self, filename: str, document_id: str, original_filename: str, size: int, owner_id: str = "default"):
         self._mapping[filename] = {
             "document_id": document_id,
             "original_filename": original_filename,
             "size": size,
             "uploaded_at": datetime.now().isoformat(),
+            "owner_id": owner_id,
         }
         self._save()
 
@@ -44,6 +45,17 @@ class DocumentRegistry:
 
     def get_document(self, filename: str) -> Optional[Dict[str, Any]]:
         return self._mapping.get(filename)
+
+    def get_documents_by_owner(self, owner_id: str) -> Dict[str, Dict[str, Any]]:
+        return {
+            filename: entry
+            for filename, entry in self._mapping.items()
+            if entry.get("owner_id") == owner_id
+        }
+
+    def get_owner(self, filename: str) -> Optional[str]:
+        entry = self._mapping.get(filename)
+        return entry.get("owner_id") if entry else None
 
     def unregister(self, filename: str):
         self._mapping.pop(filename, None)

@@ -1,6 +1,5 @@
 import os
 from datetime import datetime
-from typing import Optional
 
 def get_file_info(file_path: str) -> dict:
     return {
