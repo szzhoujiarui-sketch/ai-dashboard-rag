@@ -34,3 +34,4 @@ backend/uploads/*
 backend/chroma_db/*
 !backend/uploads/.gitkeep
 !backend/chroma_db/.gitkeep
+chroma_db/
