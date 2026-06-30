@@ -3,7 +3,7 @@ import os
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -20,7 +20,7 @@ from app.main import app
 from app.config import settings
 from app.modules.api.documents import get_upload_path
 from app.modules.dashboard.metrics import MetricsCollector
-from app.modules.rag.document_registry import DocumentRegistry, _delete_lock
+from app.modules.rag.document_registry import DocumentRegistry
 
 
 AUTH_HEADER = {"X-API-Key": "test-api-key-123"}
@@ -354,3 +354,96 @@ def test_concurrent_delete_same_file_is_safe(tmp_path, monkeypatch):
     assert not test_file.exists()
 
     assert "shared.txt" not in registry._mapping
+
+
+def test_app_api_keys_parsing(monkeypatch):
+    from app import config
+    monkeypatch.setattr(config.settings, "app_api_keys", "key1:alice,key2:bob")
+    owners = config.settings.get_api_key_owners()
+    assert owners == {"key1": "alice", "key2": "bob"}
+
+
+def test_app_api_keys_empty_when_unset(monkeypatch):
+    from app import config
+    monkeypatch.setattr(config.settings, "app_api_keys", "")
+    owners = config.settings.get_api_key_owners()
+    assert owners == {}
+
+
+def test_verify_api_key_with_app_api_keys_rejects_missing_header(monkeypatch):
+    from app import config
+    from app.modules.api.auth import verify_api_key
+    monkeypatch.setattr(config.settings, "app_api_keys", "key1:alice")
+    with pytest.raises(HTTPException) as exc:
+        verify_api_key(api_key_header=None)
+    assert exc.value.status_code == 401
+
+
+def test_verify_api_key_with_app_api_keys_returns_owner(monkeypatch):
+    from app import config
+    from app.modules.api.auth import verify_api_key
+    monkeypatch.setattr(config.settings, "app_api_keys", "key1:alice")
+    user = verify_api_key(api_key_header="key1")
+    assert user.owner_id == "alice"
+
+
+def test_document_registry_stores_owner_id(tmp_path, monkeypatch):
+    registry_path = tmp_path / "document_registry.json"
+    monkeypatch.setattr(
+        "app.modules.rag.document_registry.REGISTRY_PATH", str(registry_path)
+    )
+
+    registry = DocumentRegistry()
+    registry.register("a.txt", "doc-1", "a.txt", 10, owner_id="alice")
+    registry.register("b.txt", "doc-2", "b.txt", 20, owner_id="bob")
+
+    assert registry.get_owner("a.txt") == "alice"
+    assert registry.get_owner("b.txt") == "bob"
+
+    alice_docs = registry.get_documents_by_owner("alice")
+    assert "a.txt" in alice_docs
+    assert "b.txt" not in alice_docs
+
+
+def test_delete_document_rejects_wrong_owner(tmp_path, monkeypatch):
+    registry_path = tmp_path / "document_registry.json"
+    upload_dir = tmp_path / "uploads"
+    upload_dir.mkdir()
+
+    monkeypatch.setattr("app.modules.rag.document_registry.REGISTRY_PATH", str(registry_path))
+    monkeypatch.setattr(settings, "upload_dir", str(upload_dir))
+    from app import config
+    monkeypatch.setattr(config.settings, "app_api_keys", "key-alice:alice,key-bob:bob")
+
+    from app.modules.rag.document_registry import document_registry
+
+    file_path = upload_dir / "doc-alice.txt"
+    file_path.write_text("alice content")
+    document_registry._mapping = {}
+    document_registry.register("doc-alice.txt", "doc-1", "doc-alice.txt", 12, owner_id="alice")
+
+    with TestClient(app) as client:
+        response = client.delete(
+            "/api/v1/documents/doc-alice.txt",
+            headers={"X-API-Key": "key-bob"},
+        )
+
+    assert response.status_code == 403
+    assert "无权删除" in response.json()["detail"]
+
+
+def test_chat_k_bounds_are_enforced():
+    with TestClient(app) as client:
+        response_zero = client.post(
+            "/api/v1/chat/ask",
+            json={"question": "hi", "k": 0},
+            headers=AUTH_HEADER,
+        )
+        assert response_zero.status_code == 422
+
+        response_oversized = client.post(
+            "/api/v1/chat/ask",
+            json={"question": "hi", "k": 101},
+            headers=AUTH_HEADER,
+        )
+        assert response_oversized.status_code == 422
