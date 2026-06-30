@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 os.environ.setdefault("OPENAI_API_KEY", "test-key")
+os.environ.setdefault("APP_API_KEY", "test-api-key-123")
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -19,6 +20,9 @@ from app.modules.dashboard.metrics import MetricsCollector
 from app.modules.rag.document_registry import DocumentRegistry
 
 
+AUTH_HEADER = {"X-API-Key": "test-api-key-123"}
+
+
 def test_health_check_returns_modules():
     with TestClient(app) as client:
         response = client.get("/health")
@@ -29,7 +33,11 @@ def test_health_check_returns_modules():
 
 def test_empty_question_returns_bad_request():
     with TestClient(app) as client:
-        response = client.post("/api/v1/chat/ask", json={"question": "   "})
+        response = client.post(
+            "/api/v1/chat/ask",
+            json={"question": "   "},
+            headers=AUTH_HEADER,
+        )
 
     assert response.status_code == 400
     assert response.json()["detail"] == "问题不能为空"
@@ -73,6 +81,7 @@ def test_metrics_use_real_response_time(tmp_path):
     assert trends["avg_response_time"][-1] == 1.25
 
 
+
 def test_chat_error_does_not_leak_internal_details():
     with TestClient(app) as client:
         mock_query = AsyncMock(side_effect=RuntimeError(
@@ -80,7 +89,11 @@ def test_chat_error_does_not_leak_internal_details():
         ))
         app.state.rag_engine.query = mock_query
 
-        response = client.post("/api/v1/chat/ask", json={"question": "test"})
+        response = client.post(
+            "/api/v1/chat/ask",
+            json={"question": "test"},
+            headers=AUTH_HEADER,
+        )
 
     assert response.status_code == 500
     detail = response.json()["detail"]
@@ -101,6 +114,7 @@ def test_upload_error_does_not_leak_internal_details():
         response = client.post(
             "/api/v1/documents/upload",
             files={"file": ("test.txt", b"hello world", "text/plain")},
+            headers=AUTH_HEADER,
         )
 
     assert response.status_code == 500
@@ -122,7 +136,9 @@ def test_unhandled_exception_returns_generic_error():
             app.state.rag_engine.query = crash
 
             response = client.post(
-                "/api/v1/chat/ask", json={"question": "test"}
+                "/api/v1/chat/ask",
+                json={"question": "test"},
+                headers=AUTH_HEADER,
             )
         finally:
             app.state.rag_engine.query = original
@@ -131,3 +147,53 @@ def test_unhandled_exception_returns_generic_error():
     detail = response.json()["detail"]
     assert detail == "查询失败"
     assert "/etc/passwd" not in detail
+
+
+def test_health_check_no_auth_required():
+    with TestClient(app) as client:
+        response = client.get("/health")
+
+    assert response.status_code == 200
+
+
+def test_chat_rejects_without_api_key():
+    with TestClient(app) as client:
+        response = client.post("/api/v1/chat/ask", json={"question": "test"})
+
+    assert response.status_code == 403
+
+
+def test_chat_rejects_with_wrong_api_key():
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/v1/chat/ask",
+            json={"question": "test"},
+            headers={"X-API-Key": "wrong-key"},
+        )
+
+    assert response.status_code == 403
+
+
+def test_chat_accepts_valid_api_key():
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/v1/chat/ask",
+            json={"question": "   "},
+            headers=AUTH_HEADER,
+        )
+
+    assert response.status_code == 400
+
+
+def test_documents_list_requires_auth():
+    with TestClient(app) as client:
+        response = client.get("/api/v1/documents/list")
+
+    assert response.status_code == 403
+
+
+def test_stats_dashboard_accepts_valid_api_key():
+    with TestClient(app) as client:
+        response = client.get("/api/v1/stats/dashboard", headers=AUTH_HEADER)
+
+    assert response.status_code == 200

@@ -53,6 +53,15 @@ export const api = axios.create({
   baseURL: API_BASE_URL,
 });
 
+const apiKey = import.meta.env.VITE_API_KEY;
+
+api.interceptors.request.use((config) => {
+  if (apiKey) {
+    config.headers.set('X-API-Key', apiKey);
+  }
+  return config;
+});
+
 export const documentApi = {
   upload: async (file: File) => {
     const formData = new FormData();

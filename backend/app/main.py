@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from contextlib import asynccontextmanager
@@ -7,6 +7,7 @@ import logging
 from dotenv import load_dotenv
 
 from app.modules.api import documents, chat, stats
+from app.modules.api.auth import verify_api_key
 from app.modules.rag.engine import RAGEngine
 from app.modules.dashboard.metrics import MetricsCollector
 from app.config import settings
@@ -41,9 +42,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.include_router(documents.router, prefix="/api/v1/documents", tags=["documents"])
-app.include_router(chat.router, prefix="/api/v1/chat", tags=["chat"])
-app.include_router(stats.router, prefix="/api/v1/stats", tags=["stats"])
+app.include_router(documents.router, prefix="/api/v1/documents", tags=["documents"], dependencies=[Depends(verify_api_key)])
+app.include_router(chat.router, prefix="/api/v1/chat", tags=["chat"], dependencies=[Depends(verify_api_key)])
+app.include_router(stats.router, prefix="/api/v1/stats", tags=["stats"], dependencies=[Depends(verify_api_key)])
 
 
 @app.exception_handler(Exception)

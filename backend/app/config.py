@@ -11,6 +11,7 @@ class Settings(BaseSettings):
     upload_dir: str = "./uploads"
     max_file_size: str = "10MB"
     allowed_origins: str = "http://localhost:3000,http://127.0.0.1:3000"
+    app_api_key: str = ""
 
     @property
     def cors_origins(self) -> List[str]:
