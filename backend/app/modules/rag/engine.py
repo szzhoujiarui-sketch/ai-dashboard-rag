@@ -2,7 +2,6 @@ from langchain_community.document_loaders import PyPDFLoader, TextLoader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import Chroma
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
-from langchain.chains import RetrievalQA
 from langchain.prompts import PromptTemplate
 import os
 import uuid
@@ -13,7 +12,6 @@ from ...config import settings
 class RAGEngine:
     def __init__(self):
         self.vectorstore: Optional[Chroma] = None
-        self.qa_chain: Optional[RetrievalQA] = None
         self.embeddings = OpenAIEmbeddings(
             openai_api_key=settings.openai_api_key,
             openai_api_base=settings.openai_base_url
@@ -34,15 +32,8 @@ class RAGEngine:
             embedding_function=self.embeddings,
             collection_name="documents"
         )
-        
-        self.qa_chain = RetrievalQA.from_chain_type(
-            llm=self.llm,
-            chain_type="stuff",
-            retriever=self.vectorstore.as_retriever(search_kwargs={"k": 4}),
-            return_source_documents=True
-        )
 
-    async def ingest_document(self, file_path: str) -> dict:
+    async def ingest_document(self, file_path: str, owner_id: str = "default") -> dict:
         if file_path.endswith('.pdf'):
             loader = PyPDFLoader(file_path)
         else:
@@ -58,6 +49,7 @@ class RAGEngine:
         document_id = str(uuid.uuid4())
         for chunk in chunks:
             chunk.metadata['document_id'] = document_id
+            chunk.metadata['owner_id'] = owner_id
         
         ids = [f"{document_id}_{i}" for i in range(len(chunks))]
         self.vectorstore.add_texts(
@@ -77,25 +69,42 @@ class RAGEngine:
             "pages": len(documents) if hasattr(documents, '__len__') else 1
         }
 
-    async def query(self, question: str, k: int = 4) -> dict:
-        if not self.qa_chain:
+    async def query(self, question: str, k: int = 4, owner_id: str = "default") -> dict:
+        if not self.vectorstore:
             raise RuntimeError("RAG engine not initialized")
         
         started_at = perf_counter()
-        result = self.qa_chain.invoke({"query": question})
+        retriever = self.vectorstore.as_retriever(
+            search_kwargs={"k": k, "filter": {"owner_id": owner_id}}
+        )
+        docs = retriever.get_relevant_documents(question)
+        docs_text = "\n\n".join([doc.page_content for doc in docs])
+        
+        prompt = PromptTemplate(
+            template=(
+                "使用以下上下文片段来回答问题。如果无法从上下文中找到答案，"
+                "请说明不知道，不要编造答案。\n\n"
+                "上下文:\n{context}\n\n"
+                "问题: {question}\n"
+                "回答:"
+            ),
+            input_variables=["context", "question"],
+        )
+        chain = prompt | self.llm
+        result = chain.invoke({"context": docs_text, "question": question})
         response_time = perf_counter() - started_at
         
         from app.modules.dashboard.metrics import metrics_collector
         metrics_collector.increment_queries(response_time)
         
         return {
-            "answer": result['result'],
+            "answer": result.content,
             "sources": [
                 {
                     "content": doc.page_content[:200] + "...",
                     "metadata": doc.metadata
                 }
-                for doc in result['source_documents']
+                for doc in docs
             ]
         }
 
