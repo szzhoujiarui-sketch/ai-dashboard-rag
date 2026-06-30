@@ -1,5 +1,5 @@
 from fastapi import APIRouter, HTTPException, Request, Depends
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from app.modules.rag.engine import RAGEngine
 from app.modules.api.auth import AuthUser, verify_api_key
 
@@ -7,7 +7,7 @@ router = APIRouter()
 
 class ChatRequest(BaseModel):
     question: str
-    k: int = 4
+    k: int = Field(default=4, ge=1, le=100)
 
 class ChatResponse(BaseModel):
     answer: str

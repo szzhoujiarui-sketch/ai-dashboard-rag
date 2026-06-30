@@ -34,6 +34,19 @@ def test_empty_question_returns_bad_request():
     assert response.json()["detail"] == "问题不能为空"
 
 
+def test_chat_k_bounds_are_enforced():
+    with TestClient(app) as client:
+        response_zero = client.post(
+            "/api/v1/chat/ask", json={"question": "hi", "k": 0}
+        )
+        assert response_zero.status_code == 422
+
+        response_oversized = client.post(
+            "/api/v1/chat/ask", json={"question": "hi", "k": 101}
+        )
+        assert response_oversized.status_code == 422
+
+
 def test_upload_path_rejects_traversal():
     with pytest.raises(HTTPException) as exc:
         get_upload_path("../outside.txt")
