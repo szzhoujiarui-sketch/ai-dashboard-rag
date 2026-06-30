@@ -2,6 +2,8 @@
 
 > A modular AI dashboard with RAG (Retrieval-Augmented Generation) Q&A system.
 
+[中文](README_zh.md)
+
 ## Tech Stack
 
 ### Backend
