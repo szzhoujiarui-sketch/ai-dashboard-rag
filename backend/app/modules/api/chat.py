@@ -2,6 +2,9 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 from typing import Optional
 from app.modules.rag.engine import RAGEngine
+import logging
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -22,8 +25,9 @@ async def ask_question(request: Request, req: ChatRequest):
     try:
         result = await rag_engine.query(req.question, req.k)
         return ChatResponse(**result)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"查询失败: {str(e)}")
+    except Exception:
+        logger.exception("RAG query failed")
+        raise HTTPException(status_code=500, detail="查询失败")
 
 @router.get("/history")
 async def get_chat_history():

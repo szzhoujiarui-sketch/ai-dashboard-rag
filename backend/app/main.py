@@ -1,7 +1,9 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from contextlib import asynccontextmanager
 import os
+import logging
 from dotenv import load_dotenv
 
 from app.modules.api import documents, chat, stats
@@ -10,6 +12,8 @@ from app.modules.dashboard.metrics import MetricsCollector
 from app.config import settings
 
 load_dotenv()
+
+logger = logging.getLogger(__name__)
 
 rag_engine = RAGEngine()
 metrics_collector = MetricsCollector()
@@ -40,6 +44,16 @@ app.add_middleware(
 app.include_router(documents.router, prefix="/api/v1/documents", tags=["documents"])
 app.include_router(chat.router, prefix="/api/v1/chat", tags=["chat"])
 app.include_router(stats.router, prefix="/api/v1/stats", tags=["stats"])
+
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    logger.exception("Unhandled exception")
+    return JSONResponse(
+        status_code=500,
+        content={"detail": "内部服务器错误"},
+    )
+
 
 @app.get("/health")
 async def health_check():

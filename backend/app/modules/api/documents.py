@@ -3,10 +3,13 @@ from fastapi.responses import JSONResponse
 import os
 import uuid
 import aiofiles
+import logging
 from datetime import datetime
 from app.modules.rag.engine import RAGEngine
 from app.modules.rag.document_registry import document_registry
 from app.config import settings
+
+logger = logging.getLogger(__name__)
 
 ALLOWED_EXTENSIONS = {'.pdf', '.txt', '.md', '.csv', '.json'}
 router = APIRouter()
@@ -48,11 +51,12 @@ async def upload_document(request: Request, file: UploadFile = File(...)):
         result["original_filename"] = original_filename
         return JSONResponse(content=result)
     except Exception as e:
+        logger.exception("Document ingestion failed")
         if os.path.exists(file_path):
             os.remove(file_path)
         if isinstance(e, HTTPException):
             raise
-        raise HTTPException(status_code=500, detail=f"处理文档失败: {str(e)}")
+        raise HTTPException(status_code=500, detail="处理文档失败")
 
 @router.get("/list")
 async def list_documents():
