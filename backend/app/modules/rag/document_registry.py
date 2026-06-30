@@ -1,10 +1,14 @@
+import asyncio
 import json
 import os
+import tempfile
 from datetime import datetime
 from typing import Any, Dict, Optional
 from ...config import settings
 
 REGISTRY_PATH = os.path.join(settings.chroma_persist_dir, "document_registry.json")
+
+_delete_lock = asyncio.Lock()
 
 class DocumentRegistry:
     def __init__(self):
@@ -26,8 +30,16 @@ class DocumentRegistry:
 
     def _save(self):
         os.makedirs(os.path.dirname(REGISTRY_PATH), exist_ok=True)
-        with open(REGISTRY_PATH, 'w') as f:
-            json.dump(self._mapping, f, indent=2)
+        fd, tmp_path = tempfile.mkstemp(
+            dir=os.path.dirname(REGISTRY_PATH), suffix=".tmp"
+        )
+        try:
+            with os.fdopen(fd, "w") as f:
+                json.dump(self._mapping, f, indent=2)
+            os.replace(tmp_path, REGISTRY_PATH)
+        except Exception:
+            os.remove(tmp_path)
+            raise
 
     def register(self, filename: str, document_id: str, original_filename: str, size: int):
         self._mapping[filename] = {

@@ -6,7 +6,7 @@ import aiofiles
 import logging
 from datetime import datetime
 from app.modules.rag.engine import RAGEngine
-from app.modules.rag.document_registry import document_registry
+from app.modules.rag.document_registry import _delete_lock, document_registry
 from app.config import settings
 
 logger = logging.getLogger(__name__)
@@ -83,13 +83,18 @@ async def list_documents():
 async def delete_document(request: Request, filename: str):
     rag_engine: RAGEngine = request.app.state.rag_engine
     file_path = get_upload_path(filename)
-    
-    if os.path.exists(file_path):
+
+    async with _delete_lock:
         document_id = document_registry.get_document_id(filename)
         if document_id:
             await rag_engine.delete_document(document_id)
+
+        try:
+            os.remove(file_path)
+        except FileNotFoundError:
             document_registry.unregister(filename)
-        
-        os.remove(file_path)
-        return {"status": "deleted", "filename": filename}
-    raise HTTPException(status_code=404, detail="文件不存在")
+            raise HTTPException(status_code=404, detail="文件不存在")
+
+        document_registry.unregister(filename)
+
+    return {"status": "deleted", "filename": filename}
