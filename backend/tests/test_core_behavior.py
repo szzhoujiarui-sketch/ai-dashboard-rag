@@ -1,5 +1,7 @@
+import json
 import os
 import sys
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
@@ -15,6 +17,7 @@ from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 from app.main import app
+from app.config import settings
 from app.modules.api.documents import get_upload_path
 from app.modules.dashboard.metrics import MetricsCollector
 from app.modules.rag.document_registry import DocumentRegistry
@@ -79,6 +82,7 @@ def test_metrics_use_real_response_time(tmp_path):
     assert stats["avg_response_time"] == 1.25
     assert "avg_accuracy" not in stats
     assert trends["avg_response_time"][-1] == 1.25
+
 
 
 
@@ -197,3 +201,94 @@ def test_stats_dashboard_accepts_valid_api_key():
         response = client.get("/api/v1/stats/dashboard", headers=AUTH_HEADER)
 
     assert response.status_code == 200
+
+
+def test_query_history_capped_at_max(tmp_path, monkeypatch):
+    monkeypatch.setattr(settings, "max_query_history", 5)
+
+    collector = MetricsCollector()
+    collector.metrics_file = str(tmp_path / "metrics.json")
+    collector.total_queries = 0
+    collector.total_documents = 0
+    collector.query_history = []
+
+    for i in range(10):
+        collector.increment_queries(float(i))
+
+    assert len(collector.query_history) == 5
+    assert collector.query_history[0]["response_time"] == 5.0
+    assert collector.query_history[-1]["response_time"] == 9.0
+
+
+def test_query_history_removes_expired_entries(tmp_path, monkeypatch):
+    monkeypatch.setattr(settings, "query_history_retention_days", 7)
+
+    collector = MetricsCollector()
+    collector.metrics_file = str(tmp_path / "metrics.json")
+    collector.total_queries = 0
+    collector.total_documents = 0
+    old_date = (datetime.now() - timedelta(days=10)).isoformat()
+    recent_date = datetime.now().isoformat()
+    collector.query_history = [
+        {"timestamp": old_date, "response_time": 1.0},
+        {"timestamp": recent_date, "response_time": 2.0},
+    ]
+
+    collector._trim()
+
+    assert len(collector.query_history) == 1
+    assert collector.query_history[0]["response_time"] == 2.0
+
+
+def test_load_trims_oversized_metrics_file(tmp_path, monkeypatch):
+    monkeypatch.setattr(settings, "max_query_history", 3)
+
+    metrics_path = tmp_path / "metrics.json"
+
+    oversized = {
+        "total_queries": 100,
+        "total_documents": 50,
+        "query_history": [
+            {"timestamp": datetime.now().isoformat(), "response_time": float(i)}
+            for i in range(10)
+        ],
+    }
+    with open(metrics_path, "w") as f:
+        json.dump(oversized, f)
+
+    collector = MetricsCollector()
+    collector.metrics_file = str(metrics_path)
+    collector._load()
+
+    assert len(collector.query_history) == 3
+
+
+def test_query_history_skips_invalid_timestamps(tmp_path):
+    collector = MetricsCollector()
+    collector.metrics_file = str(tmp_path / "metrics.json")
+    collector.total_queries = 0
+    collector.total_documents = 0
+    collector.query_history = [
+        {"timestamp": "not-a-date", "response_time": 1.0},
+        {"response_time": 2.0},
+        {"timestamp": datetime.now().isoformat(), "response_time": 3.0},
+    ]
+
+    collector._trim()
+
+    assert len(collector.query_history) == 1
+    assert collector.query_history[0]["response_time"] == 3.0
+
+
+def test_query_history_accepts_timezone_aware_timestamps(tmp_path):
+    collector = MetricsCollector()
+    collector.metrics_file = str(tmp_path / "metrics.json")
+    collector.total_queries = 0
+    collector.total_documents = 0
+    collector.query_history = [
+        {"timestamp": datetime.now(timezone.utc).isoformat(), "response_time": 1.0},
+    ]
+
+    collector._trim()
+
+    assert len(collector.query_history) == 1
