@@ -1,6 +1,7 @@
 import os
 import sys
 from pathlib import Path
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -70,3 +71,63 @@ def test_metrics_use_real_response_time(tmp_path):
     assert stats["avg_response_time"] == 1.25
     assert "avg_accuracy" not in stats
     assert trends["avg_response_time"][-1] == 1.25
+
+
+def test_chat_error_does_not_leak_internal_details():
+    with TestClient(app) as client:
+        mock_query = AsyncMock(side_effect=RuntimeError(
+            "/app/chroma_db/internal-path api-key=sk-abc123"
+        ))
+        app.state.rag_engine.query = mock_query
+
+        response = client.post("/api/v1/chat/ask", json={"question": "test"})
+
+    assert response.status_code == 500
+    detail = response.json()["detail"]
+    assert detail == "查询失败"
+    assert "/app/chroma_db" not in detail
+    assert "api-key" not in detail
+    assert "sk-" not in detail
+    assert "internal-path" not in detail
+
+
+def test_upload_error_does_not_leak_internal_details():
+    with TestClient(app) as client:
+        mock_ingest = AsyncMock(side_effect=RuntimeError(
+            "/app/uploads/secret-file.txt PyPDFLoader internal trace"
+        ))
+        app.state.rag_engine.ingest_document = mock_ingest
+
+        response = client.post(
+            "/api/v1/documents/upload",
+            files={"file": ("test.txt", b"hello world", "text/plain")},
+        )
+
+    assert response.status_code == 500
+    detail = response.json()["detail"]
+    assert detail == "处理文档失败"
+    assert "/app/uploads" not in detail
+    assert "PyPDFLoader" not in detail
+    assert "secret-file" not in detail
+
+
+def test_unhandled_exception_returns_generic_error():
+    with TestClient(app) as client:
+
+        original = app.state.rag_engine.query
+        try:
+
+            async def crash(*args, **kwargs):
+                raise ValueError("/etc/passwd sensitive info")
+            app.state.rag_engine.query = crash
+
+            response = client.post(
+                "/api/v1/chat/ask", json={"question": "test"}
+            )
+        finally:
+            app.state.rag_engine.query = original
+
+    assert response.status_code == 500
+    detail = response.json()["detail"]
+    assert detail == "查询失败"
+    assert "/etc/passwd" not in detail
