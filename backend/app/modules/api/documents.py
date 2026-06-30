@@ -1,6 +1,5 @@
 from fastapi import APIRouter, UploadFile, File, HTTPException, Request
 from fastapi.responses import JSONResponse
-import asyncio
 import os
 import uuid
 import aiofiles
@@ -93,7 +92,8 @@ async def delete_document(request: Request, filename: str):
         try:
             os.remove(file_path)
         except FileNotFoundError:
-            pass
+            document_registry.unregister(filename)
+            raise HTTPException(status_code=404, detail="文件不存在")
 
         document_registry.unregister(filename)
 

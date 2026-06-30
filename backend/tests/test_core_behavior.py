@@ -293,12 +293,12 @@ def test_query_history_accepts_timezone_aware_timestamps(tmp_path):
 
     assert len(collector.query_history) == 1
 
-def test_delete_nonexistent_file_is_idempotent():
+def test_delete_nonexistent_file_returns_not_found():
     with TestClient(app) as client:
-            response = client.delete("/api/v1/documents/nonexistent.txt", headers=AUTH_HEADER)
+        response = client.delete("/api/v1/documents/nonexistent.txt", headers=AUTH_HEADER)
 
-    assert response.status_code == 200
-    assert response.json()["status"] == "deleted"
+    assert response.status_code == 404
+    assert response.json()["detail"] == "文件不存在"
 
 
 def test_registry_save_is_atomic(tmp_path, monkeypatch):
@@ -347,8 +347,9 @@ def test_concurrent_delete_same_file_is_safe(tmp_path, monkeypatch):
             ]
             results = [f.result() for f in futures]
 
-    assert all(r.status_code == 200 for r in results)
-    assert all(r.json()["status"] == "deleted" for r in results)
+    assert sorted(r.status_code for r in results) == [200, 404]
+    assert any(r.json().get("status") == "deleted" for r in results)
+    assert any(r.json().get("detail") == "文件不存在" for r in results)
 
     assert not test_file.exists()
 
