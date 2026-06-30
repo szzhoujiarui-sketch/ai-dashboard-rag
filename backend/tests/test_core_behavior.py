@@ -20,7 +20,7 @@ from app.main import app
 from app.config import settings
 from app.modules.api.documents import get_upload_path
 from app.modules.dashboard.metrics import MetricsCollector
-from app.modules.rag.document_registry import DocumentRegistry
+from app.modules.rag.document_registry import DocumentRegistry, _delete_lock
 
 
 AUTH_HEADER = {"X-API-Key": "test-api-key-123"}
@@ -292,3 +292,64 @@ def test_query_history_accepts_timezone_aware_timestamps(tmp_path):
     collector._trim()
 
     assert len(collector.query_history) == 1
+
+def test_delete_nonexistent_file_is_idempotent():
+    with TestClient(app) as client:
+            response = client.delete("/api/v1/documents/nonexistent.txt", headers=AUTH_HEADER)
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "deleted"
+
+
+def test_registry_save_is_atomic(tmp_path, monkeypatch):
+    registry_path = tmp_path / "document_registry.json"
+    monkeypatch.setattr("app.modules.rag.document_registry.REGISTRY_PATH", str(registry_path))
+
+    registry = DocumentRegistry()
+    registry.register("doc.txt", "doc-1", "original.txt", 100)
+
+    assert os.path.exists(registry_path)
+    data = json.loads(registry_path.read_text())
+    assert data["doc.txt"]["document_id"] == "doc-1"
+
+    tmp_files = list(tmp_path.glob("*.tmp"))
+    assert len(tmp_files) == 0
+
+
+def test_concurrent_delete_same_file_is_safe(tmp_path, monkeypatch):
+    registry_path = tmp_path / "document_registry.json"
+    monkeypatch.setattr("app.modules.rag.document_registry.REGISTRY_PATH", str(registry_path))
+
+    upload_dir = tmp_path / "uploads"
+    monkeypatch.setattr(settings, "upload_dir", str(upload_dir))
+    upload_dir.mkdir()
+    test_file = upload_dir / "shared.txt"
+    test_file.write_text("hello")
+
+    registry = DocumentRegistry()
+    registry.register("shared.txt", "doc-shared", "shared.txt", 5)
+    monkeypatch.setattr("app.modules.api.documents.document_registry", registry)
+
+    with TestClient(app) as client:
+
+        async def safe_delete(document_id):
+            return True
+        app.state.rag_engine.delete_document = safe_delete
+
+        import concurrent.futures
+        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+            futures = [
+                executor.submit(
+                    client.delete, "/api/v1/documents/shared.txt",
+                    headers=AUTH_HEADER
+                )
+                for _ in range(2)
+            ]
+            results = [f.result() for f in futures]
+
+    assert all(r.status_code == 200 for r in results)
+    assert all(r.json()["status"] == "deleted" for r in results)
+
+    assert not test_file.exists()
+
+    assert "shared.txt" not in registry._mapping
