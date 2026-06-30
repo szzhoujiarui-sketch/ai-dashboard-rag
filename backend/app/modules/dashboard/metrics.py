@@ -10,6 +10,28 @@ class MetricsCollector:
         self.started_at = datetime.now()
         self._load()
 
+    def _trim(self):
+        cutoff = datetime.now() - timedelta(days=settings.query_history_retention_days)
+        retained = []
+        for query in self.query_history:
+            timestamp = self._parse_timestamp(query.get("timestamp"))
+            if timestamp and timestamp >= cutoff:
+                retained.append(query)
+        self.query_history = retained
+        if len(self.query_history) > settings.max_query_history:
+            self.query_history = self.query_history[-settings.max_query_history:]
+
+    def _parse_timestamp(self, value):
+        if not isinstance(value, str):
+            return None
+        try:
+            timestamp = datetime.fromisoformat(value)
+        except ValueError:
+            return None
+        if timestamp.tzinfo is not None:
+            timestamp = timestamp.astimezone().replace(tzinfo=None)
+        return timestamp
+
     def _load(self):
         if os.path.exists(self.metrics_file):
             with open(self.metrics_file, 'r') as f:
@@ -17,12 +39,14 @@ class MetricsCollector:
                 self.total_queries = data.get("total_queries", 0)
                 self.total_documents = data.get("total_documents", 0)
                 self.query_history = data.get("query_history", [])
+            self._trim()
         else:
             self.total_queries = 0
             self.total_documents = 0
             self.query_history = []
 
     def _save(self):
+        self._trim()
         os.makedirs(os.path.dirname(self.metrics_file), exist_ok=True)
         with open(self.metrics_file, 'w') as f:
             json.dump({
@@ -56,7 +80,8 @@ class MetricsCollector:
     def get_dashboard_stats(self) -> Dict[str, Any]:
         avg_response_time = 0.0
         if self.query_history:
-            avg_response_time = sum(q.get("response_time", 0.0) for q in self.query_history[-100:]) / min(len(self.query_history), 100)
+            recent = self.query_history[-100:]
+            avg_response_time = sum(q.get("response_time", 0.0) for q in recent) / len(recent)
         
         return {
             "total_queries": self.total_queries,
